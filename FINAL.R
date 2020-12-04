@@ -245,6 +245,36 @@ map_resid <- tm_shape(income.tracts.no0) +
 
 map_resid
 
+###Global Moran's I for Linear Regression
+
+vri.nb <- poly2nb(income.tracts.no0)
+vri.net <- nb2lines(vri.nb, coords=coordinates(income.tracts.no0))
+crs(vri.net) <- crs(income.tracts.no0)
+
+tm_shape(income.tracts.no0) + tm_borders(col='lightgrey') + 
+  tm_shape(vri.net) + tm_lines(col='red')
+
+
+vri.lw <- nb2listw(vri.nb, zero.policy = TRUE, style = "W")
+print.listw(vri.lw, zero.policy = TRUE)
+
+
+mi <- moran.test(income.tracts.no0$residuals, vri.lw, zero.policy = TRUE)
+mi
+
+moran.range <- function(lw) {
+  wmat <- listw2mat(lw)
+  return(range(eigen((wmat + t(wmat))/2)$values))
+}
+moran.range(vri.lw)
+
+mI <- mi$estimate[[1]]
+eI <- mi$estimate[[2]]
+var <- mi$estimate[[3]]
+
+z <- (mI-eI)/(sqrt(var))
+z
+
 ###GEOGRAPHICALL WEIGHTED REGRESSION
 income.tracts.no0.coords <- sp::coordinates(income.tracts.no0)
 

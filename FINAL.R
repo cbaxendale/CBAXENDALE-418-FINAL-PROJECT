@@ -49,53 +49,57 @@ income.tracts <- income.tracts[!is.na(income.tracts$Income),]
 #Reproject the data:
 income.tracts <- spTransform(income.tracts, CRS("+init=epsg:26910"))
 
-tmaptools::palette_explorer()
+tmap_mode("view")
 
+#Create choropleth map of income:
 map_Income <- tm_shape(income.tracts) +
   tm_polygons(col = "Income",
-              title = "Median Income",
+              title = "Median Income, Greater vANCOU, 2016 ($CAD)",
               style = "jenks",
               palette = "viridis", n = 6) +
   tm_legend(legend.position = c("LEFT", "BOTTOM"))
 
 map_Income
 
-###Descriptive Stats###
-
+###DESCRIPTIVE STATISTICS###
+#Mean income
 meanincome <- mean(income$Income, na.rm = TRUE)
+meanincome
+#Standard deviation of income
+sdincome <- sd(income$Income, na.rm = TRUE) 
+sdincome
+#range of income
+range(income$Income, na.rm = TRUE)
+#mean pm2.5
+mean25 <- mean(pm2.5$PM25, na.rm = TRUE)
+mean25
+#range pm2.5
+range(pm2.5$PM25, na.rm = TRUE)
 
-###Income Segregation###
+###SPATIAL SEGREGATION OF INCOME###
 #Global Moran's I
-vri.nb <- poly2nb(income.tracts)
-vri.net <- nb2lines(vri.nb, coords=coordinates(income.tracts))
-crs(vri.net) <- crs(income.tracts)
+income.nb <- poly2nb(income.tracts)
+income.net <- nb2lines(income.nb, coords=coordinates(income.tracts))
+crs(income.net) <- crs(income.tracts)
 
 tm_shape(income.tracts) + tm_borders(col='lightgrey') + 
-  tm_shape(vri.net) + tm_lines(col='red')
+  tm_shape(income.net) + tm_lines(col='red')
 
+income.lw <- nb2listw(income.nb, zero.policy = TRUE, style = "W")
+print.listw(income.lw, zero.policy = TRUE)
 
-vri.lw <- nb2listw(vri.nb, zero.policy = TRUE, style = "W")
-print.listw(vri.lw, zero.policy = TRUE)
+mi1 <- moran.test(income.tracts$Income, income.lw, zero.policy = TRUE)
+mi1
 
+mI1 <- mi1$estimate[[1]]
+eI1 <- mi1$estimate[[2]]
+var1 <- mi1$estimate[[3]]
 
-mi <- moran.test(income.tracts$Income, vri.lw, zero.policy = TRUE)
-mi
-
-moran.range <- function(lw) {
-  wmat <- listw2mat(lw)
-  return(range(eigen((wmat + t(wmat))/2)$values))
-}
-moran.range(vri.lw)
-
-mI <- mi$estimate[[1]]
-eI <- mi$estimate[[2]]
-var <- mi$estimate[[3]]
-
-z <- (mI-eI)/(sqrt(var))
-z
+z1 <- (mI1-eI1)/(sqrt(var1))
+z1
 
 #Local Moran's I
-lisa.test <- localmoran(income.tracts$Income, vri.lw, zero.policy = TRUE)
+lisa.test <- localmoran(income.tracts$Income, income.lw, zero.policy = TRUE)
 
 income.tracts$Ii <- lisa.test[,1]
 income.tracts$E.Ii<- lisa.test[,2]
@@ -103,12 +107,10 @@ income.tracts$Var.Ii<- lisa.test[,3]
 income.tracts$Z.Ii<- lisa.test[,4]
 income.tracts$P<- lisa.test[,5]
 
-moran.plot(income.tracts$Income, vri.lw, zero.policy=TRUE, spChk=NULL, labels=NULL, xlab="Median Income", 
-           ylab="Spatially Lagged Income", quiet=NULL)
+moran.plot(income.tracts$Income, income.lw, zero.policy=TRUE, spChk=NULL, labels=NULL, xlab="Median Income", 
+           ylab="Spatially Lagged Median Income", quiet=NULL)
 
-
-###Spatial Interpolation of PM2.5
-#Create an empty grid where n is the total number of cells
+###SPATIAL INTERPOLATION OF PM2.5###
 #Create a grid called grd to use in your interpolation
 grd <- as.data.frame(spsample(pm2.5, "regular", n=50000))
 names(grd)       <- c("X", "Y")
@@ -117,22 +119,20 @@ gridded(grd)     <- TRUE
 fullgrid(grd)    <- TRUE  
 proj4string(grd) <- proj4string(income.tracts)
 
-
 P.idw <- gstat::idw(PM25 ~ 1, pm2.5, newdata=grd, idp=4)
 r       <- raster(P.idw)
 r.m     <- mask(r, income.tracts)
 
 tm_shape(r.m) + 
   tm_raster(n=10,palette = "YlOrRd",
-            title="Predicted PM2.5 Concentration (ppm)") + 
+            title="Predicted PM2.5 Concentration (micrograms/cubic meter)") + 
   tm_shape(income.tracts) + tm_dots(size=0.2) +
   tm_legend(legend.outside=TRUE)
 
-###Point Pattern Analysis to Determine if PM2.5 is random
+###POINT PATTERN ANALYSIS TO DETERMINE IF PM2.5 IS RANDOMLY DISTRIBUTED###
 kma <- pm2.5
 kma$x <- coordinates(kma)[,1]
 kma$y <- coordinates(kma)[,2]
-
 
 zd <- zerodist(kma)
 zd
@@ -145,7 +145,7 @@ window <- as.owin(list(xrange = kma.ext[1,], yrange = kma.ext[2,]))
 
 kma.ppp <- ppp(x = kma$x, y = kma$y, window = window)
 
-###NND
+#NND
 nearestNeighbour <- nndist(kma.ppp)
 
 nearestNeighbour=as.data.frame(as.numeric(nearestNeighbour))
@@ -170,8 +170,7 @@ SE.NND <- 0.26136/(sqrt(n*pointDensity))
 z = (nnd-r.nnd)/SE.NND
 z
 
-##QUADRAT ANALYSIS
-
+#QUADRAT ANALYSIS
 quads <- 10
 
 qcount <- quadratcount(kma.ppp, nx = quads, ny = quads)
@@ -198,33 +197,37 @@ VAR <- ((sum.f.x2)-((sum.fx.2)/M))/M-1
 MEAN <- N/M
 
 VMR <- VAR/MEAN
+VMR
 
 ChiSq <- (VMR*(M-1))
 ChiSq
 
 VAR
 
-###COMBINING DATA
-#Convert your interpolation into a raster and map it:
+###COMBINING DATA###
+#Convert your interpolation into a raster and map it
 r <- raster(r.m)
 sufaceMap <- tm_shape(r.m) + 
   tm_raster(n=5,palette = "viridis",
-            title="PM 2.5 \n(in ppm)") +
+            title="Predicted PM2.5 Concentration (micrograms/cubic meter)") +
   tm_shape(pm2.5) + tm_dots(size=0.2)
 
 sufaceMap
 
 income.tracts$Pm2.5 <- round(extract(r.m, income.tracts, fun = mean)[,1], 5)
 
-###LINEAR REGRESSION
+###LINEAR REGRESSION###
 
 income.tracts.no0 <-  income.tracts[which(income.tracts$Pm2.5 > 0), ]
 
 plot(income.tracts.no0$Income~income.tracts.no0$Pm2.5)
+plot(income.tracts.no0$Income~income.tracts.no0$Pm2.5, zero.policy=TRUE, spChk=NULL, labels=NULL, xlab="PM2.5 Concentration (um/m3)", 
+           ylab="Median Income (CAD$)", quiet=NULL)
+
+
 
 lm.model <- lm(income.tracts.no0$Income~income.tracts.no0$Pm2.5)
 
-plot(income.tracts.no0$Income~income.tracts.no0$Pm2.5)
 abline(lm.model, col = "red")
 
 summary(lm.model)
@@ -237,7 +240,7 @@ head(income.tracts.no0)
 
 map_resid <- tm_shape(income.tracts.no0) +
   tm_polygons(col = "residuals",
-              title = "Median Income",
+              title = "Linear Regression Residuals, Median Income, Metro Vancvouer, 2016",
               style = "fisher",
               palette = "viridis", n = 6,
               midpoint = 0, border.alpha = 0.1) +
@@ -245,37 +248,29 @@ map_resid <- tm_shape(income.tracts.no0) +
 
 map_resid
 
-###Global Moran's I for Linear Regression
-
-vri.nb <- poly2nb(income.tracts.no0)
-vri.net <- nb2lines(vri.nb, coords=coordinates(income.tracts.no0))
-crs(vri.net) <- crs(income.tracts.no0)
+#Global Moran's I for Linear Regression
+reg.nb <- poly2nb(income.tracts.no0)
+reg.net <- nb2lines(reg.nb, coords=coordinates(income.tracts.no0))
+crs(reg.net) <- crs(income.tracts.no0)
 
 tm_shape(income.tracts.no0) + tm_borders(col='lightgrey') + 
-  tm_shape(vri.net) + tm_lines(col='red')
+  tm_shape(reg.net) + tm_lines(col='red')
+
+reg.lw <- nb2listw(reg.nb, zero.policy = TRUE, style = "W")
+print.listw(reg.lw, zero.policy = TRUE)
 
 
-vri.lw <- nb2listw(vri.nb, zero.policy = TRUE, style = "W")
-print.listw(vri.lw, zero.policy = TRUE)
+mi2 <- moran.test(income.tracts.no0$residuals, reg.lw, zero.policy = TRUE)
+mi2
 
+mI2 <- mi2$estimate[[1]]
+eI2 <- mi2$estimate[[2]]
+var2 <- mi2$estimate[[3]]
 
-mi <- moran.test(income.tracts.no0$residuals, vri.lw, zero.policy = TRUE)
-mi
+z2 <- (mI2-eI2)/(sqrt(var2))
+z2
 
-moran.range <- function(lw) {
-  wmat <- listw2mat(lw)
-  return(range(eigen((wmat + t(wmat))/2)$values))
-}
-moran.range(vri.lw)
-
-mI <- mi$estimate[[1]]
-eI <- mi$estimate[[2]]
-var <- mi$estimate[[3]]
-
-z <- (mI-eI)/(sqrt(var))
-z
-
-###GEOGRAPHICALL WEIGHTED REGRESSION
+###GEOGRAPHICALL WEIGHTED REGRESSION###
 income.tracts.no0.coords <- sp::coordinates(income.tracts.no0)
 
 head(income.tracts.no0.coords)
@@ -299,7 +294,7 @@ income.tracts.no0$localr <- results$localR2
 #Create choropleth map of r-square values
 map_r2 <- tm_shape(income.tracts.no0) +
   tm_polygons(col = "localr",
-              title = "R2 values",
+              title = "R2 values for Median Income, Vancouver, BC, 2016",
               style = "fisher",
               palette = "viridis", n = 6)
 map_r2
@@ -308,8 +303,8 @@ map_r2
 income.tracts.no0$coeff <- results$income.tracts.no0.Pm2.5
 map_coef <- tm_shape(income.tracts.no0) +
   tm_polygons(col = "coeff",
-              title = "Coefficients",
+              title = "Coefficients for Median Income, Vancouver, BC, 2016",
               style = "fisher",
               palette = "viridis", n = 6,
-              midpoint = 0, border.alpha = 0.1)
+              midpoint = 0)
 map_coef
